@@ -62,9 +62,8 @@ const CFG={
   propuestas:{id:'1jFlFSP0coZcWqe8oQ5LzmR6BQFKRB63ahGpLwi6oMyU',hoja:'propuestas_para_importar'}
 };
 const SRV='Google Drive', TOOL='download_file_content', REFRESH=60000;
-// Sin copia de respaldo: fuera de Claude el tablero no muestra datos.
-const SNAP_AT=null;
-const SNAPSHOT={};
+// Fuera de Claude se lee directo de Google: las planillas deben estar compartidas con enlace.
+const csvUrl=k=>`https://docs.google.com/spreadsheets/d/${CFG[k].id}/gviz/tq?tqx=out:csv&headers=1&_=${Date.now()}`;
 const TABS={pagos:'Pagos mensuales',ingresos:'Ingresos por socia',propuestas:'Propuestas vigentes'};
 const SOCIAS=['María José','Lorena'];
 const MES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -193,14 +192,29 @@ function loadNow(key){
     .catch(err=>onEvent(key,{type:'error',error:err}));
 }
 
+// Lectura directa de una planilla, para páginas fuera de Claude
+let WEB=false;
+async function readWeb(key){
+  try{
+    const r=await fetch(csvUrl(key),{cache:'no-store'});
+    if(!r.ok||!(r.headers.get('content-type')||'').includes('csv'))throw new Error('respuesta '+r.status);
+    S.data[key]=parseSheet(key,await r.text());
+    S.st[key]='ok';
+    S.at[key]=Date.now();
+  }catch(e){
+    S.st[key]=S.data[key]?'stale':'error';
+  }
+}
+const readAllWeb=()=>Promise.all(Object.keys(CFG).map(readWeb)).then(render);
+
 // Lectura forzada de las tres planillas, sin caché, para verificar cambios recién subidos
 let BUSY=false;
 function refreshAll(){
-  if(!MCP||BUSY)return;
+  if((!MCP&&!WEB)||BUSY)return;
   BUSY=true;
   $('#refresh').disabled=true;
   updateMeta();
-  Promise.all(Object.keys(CFG).map(k=>
+  Promise.all(Object.keys(CFG).map(k=>WEB?readWeb(k):
     MCP.callTool(SRV,TOOL,inputFor(k),{cache:{refresh:true}})
       .then(res=>onEvent(k,{type:'data',result:res}))
       .catch(err=>onEvent(k,{type:'error',error:err}))
@@ -219,7 +233,6 @@ function stateBlock(key){
     auth:'No hay conexión con Google Drive. En claude.ai, abrí Settings → Connectors, conectá Google Drive y volvé a abrir el tablero.',
     denied:'Google Drive no está habilitado para esta vista. Pedí a quien compartió el tablero que lo habilite.',
     approval:'Falta tu permiso para leer Google Drive.',
-    nomcp:'Esta vista no puede leer Google Drive. Abrí el tablero en Claude para ver los datos.',
     error:'No se pudo leer '+hoja+'. Se reintenta solo cada minuto.',
     stale:'Mostrando el último dato leído.'
   };
@@ -294,7 +307,6 @@ function updateMeta(){
   const ats=Object.values(S.at).filter(Boolean);
   const last=ats.length?Math.max(...ats):null;
   if(BUSY){$('#meta').textContent='Leyendo Google Drive…';return}
-  if(!MCP){$('#meta').textContent=last?('Copia guardada al '+new Date(last).toLocaleDateString('es-AR')+' '+hora(last)):'Sin datos';return}
   $('#meta').textContent=last?('Actualizado '+hora(last)+' · se refresca cada minuto'):'Esperando datos…';
 }
 
@@ -321,22 +333,15 @@ document.addEventListener('change',e=>{
   render();
 });
 
-// ---------- Arranque: lectura en vivo por el conector de Google Drive ----------
+// ---------- Arranque: en Claude lee por el conector; fuera de Claude, directo de Google ----------
 render();
 (async()=>{
   let mcp=null;
   try{mcp=window.claude?await window.claude.use('mcp'):null}catch(e){mcp=null}
   if(!mcp){
-    // Sin conexión a Drive: mostrar la copia de respaldo con su fecha
-    Object.keys(CFG).forEach(k=>{
-      try{
-        S.data[k]=parseSheet(k,SNAPSHOT[k]);
-        S.st[k]='snap';
-        S.at[k]=SNAP_AT;
-      }catch(e){S.st[k]='nomcp'}
-    });
-    $('#refresh').style.display='none';
-    render();
+    WEB=true;
+    await readAllWeb();
+    setInterval(()=>{if(!BUSY)readAllWeb()},REFRESH);
     return;
   }
   MCP=mcp;
