@@ -1,0 +1,355 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Control interno CIAF</title>
+<style>
+:root{
+  /* Paleta CIAF, copiada de tokens.css sin cambios */
+  --paper:#F5F6F8;--card:#ffffff;--ink:#0E1F33;--ink-2:#475569;--ink-3:#94a3b8;
+  --line:#e6ebf2;--line-2:#eef2f8;
+  --brand:#1E4A82;--brand-2:#2D6CB8;--accent:#F26522;
+  --green:#0f9d6f;--amber:#d97706;--red:#dc2626;--red-soft:#fee2e2;
+  --shadow:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);
+  --radius:14px;
+  color-scheme:light;
+}
+body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+.wrap{max-width:1000px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.brandbar{background:var(--ink);color:var(--card);border-radius:var(--radius);padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:4px solid var(--accent);flex-wrap:wrap}
+.mark{font-weight:800;letter-spacing:.14em;font-size:18px}
+.meta{font-size:12px;color:var(--line)}
+h1{font-size:22px;margin:18px 0 4px;color:var(--ink)}
+.sub{margin:0 0 14px;color:var(--ink-2);font-size:13px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tab{padding:8px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;cursor:pointer;font:inherit}
+.tab.on{background:var(--brand);border-color:var(--brand);color:var(--card)}
+.tab:focus-visible,select:focus-visible,.btn:focus-visible{outline:2px solid var(--brand-2);outline-offset:2px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow)}
+.card small{display:block;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;font-size:11px;margin-bottom:4px}
+.card b{font-size:20px;color:var(--ink)}
+.bar{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 10px}
+.bar label{color:var(--ink-2);font-size:13px;display:flex;gap:6px;align-items:center}
+select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;max-width:100%}
+.w{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:14px;box-shadow:var(--shadow)}
+table{border-collapse:collapse;width:100%;min-width:520px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line-2)}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3)}
+.r{text-align:right}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600}
+.pill.ok{background:var(--green);color:var(--card)}
+.pill.ko{background:var(--red-soft);color:var(--red)}
+.pill.neu{background:var(--line-2);color:var(--ink-2)}
+.empty{padding:20px;text-align:center;color:var(--ink-2);background:var(--card);border:1px dashed var(--line);border-radius:var(--radius);margin-bottom:14px}
+.banner{border:1px solid var(--amber);background:var(--card);color:var(--ink);padding:8px 12px;border-radius:10px;margin-bottom:12px;font-size:13px}
+.btn{background:var(--accent);color:var(--card);border:0;padding:8px 14px;border-radius:8px;font:inherit;cursor:pointer;margin-top:10px}
+.brandbar .btn{margin-top:0}
+.btn:disabled{opacity:.6;cursor:default}
+h2{font-size:15px;margin:16px 0 8px;color:var(--ink)}
+.hint{color:var(--ink-2);font-size:13px;margin:6px 0 14px}
+</style>
+
+<div class="wrap">
+  <div class="brandbar"><span class="mark">CIAF</span><span class="meta" id="meta">Esperando datos…</span><button class="btn" id="refresh">Actualizar</button></div>
+  <h1>Control interno</h1>
+  <p class="sub">Datos en vivo desde las planillas de Google Drive. Los cambios que hagas en el Sheet aparecen acá solos.</p>
+  <nav class="tabs" id="tabs"></nav>
+  <main id="app"></main>
+</div>
+
+<script>
+const CFG={
+  pagos:{id:'1_s6ST4KHm-LbIjd5gmVkx7FoQ-MUqqARXReJztE2qyY',hoja:'pagos_para_importar'},
+  ingresos:{id:'1CSwovKJhr185RbV_gY1eOls9O6Y49obLXZkUaowA124',hoja:'ingresos_para_importar'},
+  propuestas:{id:'1jFlFSP0coZcWqe8oQ5LzmR6BQFKRB63ahGpLwi6oMyU',hoja:'propuestas_para_importar'}
+};
+const SRV='Google Drive', TOOL='download_file_content', REFRESH=60000;
+// Sin copia de respaldo: fuera de Claude el tablero no muestra datos.
+const SNAP_AT=null;
+const SNAPSHOT={};
+const TABS={pagos:'Pagos mensuales',ingresos:'Ingresos por socia',propuestas:'Propuestas vigentes'};
+const SOCIAS=['María José','Lorena'];
+const MES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money=n=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:2}).format(+n||0);
+const nowYM=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')};
+const addM=(ym,n)=>{const[y,m]=ym.split('-').map(Number);const d=new Date(y,m-1+n,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')};
+const fmtM=ym=>{if(!/^\d{4}-\d{2}$/.test(ym||''))return ym||'—';const[y,m]=ym.split('-');return MES[+m-1]+' '+y};
+const hora=ms=>new Date(ms).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
+const uniq=a=>[...new Set(a.filter(Boolean))];
+const sum=(a,k)=>a.reduce((s,r)=>s+(+r[k]||0),0);
+const card=(l,v)=>`<div class="card"><small>${l}</small><b>${v}</b></div>`;
+const isPagado=r=>norm(r.estado).startsWith('sepag');
+const socia=raw=>{const s=norm(raw);return s.startsWith('lor')?'Lorena':s.startsWith('mar')?'María José':String(raw||'').trim()};
+
+// Fecha a yyyy-mm desde "2026-11-01", "01/11/2026" o "11/2026"
+function ymOf(v){
+  v=String(v??'').trim();
+  let m=v.match(/^(\d{4})-(\d{1,2})/);if(m)return m[1]+'-'+m[2].padStart(2,'0');
+  m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)return m[3]+'-'+m[2].padStart(2,'0');
+  m=v.match(/^(\d{1,2})\/(\d{4})$/);if(m)return m[2]+'-'+m[1].padStart(2,'0');
+  return '';
+}
+
+// Números con formato US ("1,234,567.89") o argentino ("1.234.567,89")
+function num(v){
+  if(typeof v==='number')return v;
+  let s=String(v??'').trim().replace(/[$\s"]/g,'');
+  if(!s)return 0;
+  const neg=/^\(.*\)$/.test(s)||s.startsWith('-');
+  s=s.replace(/[()\-]/g,'');
+  const lc=s.lastIndexOf(','),ld=s.lastIndexOf('.');
+  if(lc>-1&&ld>-1){ if(lc>ld) s=s.replace(/\./g,'').replace(',','.'); else s=s.replace(/,/g,''); }
+  else if(lc>-1){ if(/^\d{1,3}(,\d{3})+$/.test(s)) s=s.replace(/,/g,''); else s=s.replace(',','.'); }
+  else if(ld>-1){ if(/^\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,''); }
+  const n=parseFloat(s);
+  return isNaN(n)?0:(neg?-n:n);
+}
+
+// CSV con comillas, comas dentro de campos y saltos CRLF
+function parseCSV(text){
+  const rows=[];let row=[],f='',q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){f+='"';i++} else q=false }
+      else f+=c;
+    }else{
+      if(c==='"')q=true;
+      else if(c===','){row.push(f);f=''}
+      else if(c==='\n'){row.push(f);rows.push(row);row=[];f=''}
+      else if(c!=='\r')f+=c;
+    }
+  }
+  if(f.length||row.length){row.push(f);rows.push(row)}
+  return rows.filter(r=>r.some(x=>String(x).trim()!==''));
+}
+
+function b64ToText(b64){
+  const bin=atob(b64.replace(/\s/g,''));
+  const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function payloadOf(res){
+  if(res&&res.payload&&typeof res.payload==='object')return res.payload;
+  const t=(res&&res.content||[]).find(b=>b.type==='text');
+  if(t){try{return JSON.parse(t.text)}catch(e){return t.text}}
+  return res&&res.payload;
+}
+
+function parseSheet(key,payload){
+  let text;
+  if(payload&&typeof payload.content==='string')text=b64ToText(payload.content);
+  else if(typeof payload==='string')text=payload;
+  else throw new Error('formato inesperado');
+  const rows=parseCSV(text);
+  if(!rows.length)return [];
+  const head=rows[0].map(norm);
+  const objs=rows.slice(1).map(r=>{const o={};head.forEach((h,i)=>{o[h]=String(r[i]??'').trim()});return o});
+  if(key==='pagos'){
+    return objs.filter(o=>o.concepto).map(o=>({mes:ymOf(o.mes),concepto:o.concepto,monto:num(o.monto),estado:o.estado}));
+  }
+  if(key==='ingresos'){
+    return objs.filter(o=>o.fecha||o.monto).map(o=>({fecha:o.fecha,mes:ymOf(o.fecha),socia:socia(o.socia),concepto:o.concepto,monto:num(o.monto)}));
+  }
+  return objs.filter(o=>o.cliente).map(o=>({cliente:o.cliente,propuesta:o.propuesta,duracion:num(o.duracion),inicio:ymOf(o.inicio)}));
+}
+
+// ---------- Estado ----------
+let MCP=null;
+const S={
+  tab:'pagos',mesP:null,mesI:'todos',socia:'todas',
+  data:{pagos:null,ingresos:null,propuestas:null},
+  st:{pagos:'loading',ingresos:'loading',propuestas:'loading'},
+  at:{pagos:null,ingresos:null,propuestas:null}
+};
+const inputFor=k=>({fileId:CFG[k].id,exportMimeType:'text/csv'});
+
+function onEvent(key,ev){
+  if(ev.type==='data'){
+    try{
+      S.data[key]=parseSheet(key,payloadOf(ev.result));
+      S.st[key]='ok';
+      S.at[key]=ev.result&&ev.result.cache?ev.result.cache.storedAt:Date.now();
+    }catch(e){
+      S.st[key]=S.data[key]?'stale':'error';
+    }
+  }else{
+    const c=ev.error&&ev.error.code;
+    if(c==='needs_reauth'||c==='server_not_connected'||c==='selection_required'){S.st[key]='auth';S.data[key]=null}
+    else if(c==='not_in_manifest'||c==='blocked_by_policy'){S.st[key]='denied';S.data[key]=null}
+    else if(c==='approval_required'){S.st[key]='approval';S.data[key]=null}
+    else{S.st[key]=S.data[key]?'stale':'error'}
+  }
+  render();
+}
+
+function loadNow(key){
+  if(!MCP)return;
+  MCP.callTool(SRV,TOOL,inputFor(key))
+    .then(res=>onEvent(key,{type:'data',result:res}))
+    .catch(err=>onEvent(key,{type:'error',error:err}));
+}
+
+// Lectura forzada de las tres planillas, sin caché, para verificar cambios recién subidos
+let BUSY=false;
+function refreshAll(){
+  if(!MCP||BUSY)return;
+  BUSY=true;
+  $('#refresh').disabled=true;
+  updateMeta();
+  Promise.all(Object.keys(CFG).map(k=>
+    MCP.callTool(SRV,TOOL,inputFor(k),{cache:{refresh:true}})
+      .then(res=>onEvent(k,{type:'data',result:res}))
+      .catch(err=>onEvent(k,{type:'error',error:err}))
+  )).then(()=>{
+    BUSY=false;
+    $('#refresh').disabled=false;
+    render();
+  });
+}
+
+// ---------- Render ----------
+function stateBlock(key){
+  const st=S.st[key],hoja=CFG[key].hoja;
+  const M={
+    loading:'Leyendo '+hoja+' desde Google Drive…',
+    auth:'No hay conexión con Google Drive. En claude.ai, abrí Settings → Connectors, conectá Google Drive y volvé a abrir el tablero.',
+    denied:'Google Drive no está habilitado para esta vista. Pedí a quien compartió el tablero que lo habilite.',
+    approval:'Falta tu permiso para leer Google Drive.',
+    nomcp:'Esta vista no puede leer Google Drive. Abrí el tablero en Claude para ver los datos.',
+    error:'No se pudo leer '+hoja+'. Se reintenta solo cada minuto.',
+    stale:'Mostrando el último dato leído.'
+  };
+  const btn=st==='approval'?`<div><button class="btn" data-act="permitir" data-key="${key}">Permitir lectura</button></div>`:'';
+  return `<div class="empty">${esc(M[st]||M.loading)}${btn}</div>`;
+}
+function banner(key){
+  return S.st[key]==='stale'?'<div class="banner">Drive no respondió en la última lectura. Se muestra el último dato leído.</div>':'';
+}
+
+function renderPagos(){
+  const rows=S.data.pagos;
+  if(!rows)return stateBlock('pagos');
+  const months=uniq([...rows.map(r=>r.mes),nowYM()]).sort().reverse();
+  if(!S.mesP)S.mesP=nowYM();
+  const sel=rows.filter(r=>r.mes===S.mesP);
+  const tot=sum(sel,'monto');
+  const pag=sel.filter(isPagado);
+  const totPag=sum(pag,'monto');
+  return banner('pagos')+
+    `<div class="cards">${card('Total del mes',money(tot))}${card('Pagado',money(totPag))}${card('Pendiente',money(tot-totPag))}${card('Pagos hechos',pag.length+' de '+sel.length)}</div>
+    <div class="bar"><label>Mes <select data-f="mesP">${months.map(m=>`<option value="${m}"${m===S.mesP?' selected':''}>${fmtM(m)}</option>`).join('')}</select></label></div>
+    <div class="w"><table>
+      <tr><th>Concepto</th><th class="r">Monto</th><th>Estado de pago</th></tr>
+      ${sel.map(r=>`<tr><td>${esc(r.concepto)}</td><td class="r">${money(r.monto)}</td><td><span class="pill ${isPagado(r)?'ok':'ko'}">${isPagado(r)?'Se pagó':'No se pagó'}</span></td></tr>`).join('')}
+    </table>${sel.length?'':'<div class="empty" style="margin:0;border:0">No hay pagos cargados para este mes.</div>'}</div>`;
+}
+
+function renderIngresos(){
+  const rows=S.data.ingresos;
+  if(!rows)return stateBlock('ingresos');
+  const months=uniq(rows.map(r=>r.mes)).sort();
+  const filt=rows.filter(r=>(S.mesI==='todos'||r.mes===S.mesI)&&(S.socia==='todas'||r.socia===S.socia));
+  const cards=SOCIAS.map(s=>card(s,money(sum(filt.filter(r=>r.socia===s),'monto')))).join('')+card('Total',money(sum(filt,'monto')));
+  const tm=months.map(m=>{
+    const a=rows.filter(r=>r.mes===m);
+    return `<tr><td>${fmtM(m)}</td>${SOCIAS.map(s=>`<td class="r">${money(sum(a.filter(r=>r.socia===s),'monto'))}</td>`).join('')}<td class="r"><b>${money(sum(a,'monto'))}</b></td></tr>`;
+  }).join('');
+  return banner('ingresos')+
+    `<div class="cards">${cards}</div>
+    <div class="bar">
+      <label>Mes <select data-f="mesI"><option value="todos"${S.mesI==='todos'?' selected':''}>Todos los meses</option>${[...months].reverse().map(m=>`<option value="${m}"${m===S.mesI?' selected':''}>${fmtM(m)}</option>`).join('')}</select></label>
+      <label>Socia <select data-f="socia"><option value="todas"${S.socia==='todas'?' selected':''}>Ambas socias</option>${SOCIAS.map(s=>`<option value="${s}"${s===S.socia?' selected':''}>${s}</option>`).join('')}</select></label>
+    </div>
+    <div class="w"><table>
+      <tr><th>Fecha</th><th>Socia</th><th>Concepto</th><th class="r">Monto</th></tr>
+      ${filt.map(r=>`<tr><td>${esc(r.fecha)}</td><td>${esc(r.socia)}</td><td>${esc(r.concepto)}</td><td class="r">${money(r.monto)}</td></tr>`).join('')}
+    </table>${filt.length?'':'<div class="empty" style="margin:0;border:0">Sin ingresos para este filtro.</div>'}</div>
+    <h2>Totales por mes</h2>
+    <div class="w"><table>
+      <tr><th>Mes</th>${SOCIAS.map(s=>`<th class="r">${s}</th>`).join('')}<th class="r">Total</th></tr>
+      ${tm}
+    </table></div>`;
+}
+
+function renderPropuestas(){
+  const rows=S.data.propuestas;
+  if(!rows)return stateBlock('propuestas');
+  const cur=nowYM();
+  const act=rows.filter(r=>r.duracion>0&&r.inicio).map(r=>({...r,fin:addM(r.inicio,Math.round(r.duracion)-1)}));
+  const vig=act.filter(r=>r.fin>=cur).length;
+  return banner('propuestas')+
+    `<div class="cards">${card('Propuestas',act.length)}${card('Vigentes',vig)}${card('Finalizadas',act.length-vig)}</div>
+    <div class="w"><table>
+      <tr><th>Cliente</th><th>Propuesta</th><th class="r">Duración</th><th>Inicio</th><th>Fin</th><th>Estado</th></tr>
+      ${act.map(r=>`<tr><td>${esc(r.cliente)}</td><td>${esc(r.propuesta)}</td><td class="r">${Math.round(r.duracion)} meses</td><td>${fmtM(r.inicio)}</td><td>${fmtM(r.fin)}</td><td><span class="pill ${r.fin>=cur?'ok':'neu'}">${r.fin>=cur?'Vigente':'Finalizada'}</span></td></tr>`).join('')}
+    </table>${act.length?'':'<div class="empty" style="margin:0;border:0">No hay propuestas cargadas.</div>'}</div>
+    <div class="hint">La duración de las propuestas es estimativa: al finalizar el período pactado se hace un análisis y se decide en conjunto si se continúa o no con el servicio.</div>`;
+}
+
+function updateMeta(){
+  const ats=Object.values(S.at).filter(Boolean);
+  const last=ats.length?Math.max(...ats):null;
+  if(BUSY){$('#meta').textContent='Leyendo Google Drive…';return}
+  if(!MCP){$('#meta').textContent=last?('Copia guardada al '+new Date(last).toLocaleDateString('es-AR')+' '+hora(last)):'Sin datos';return}
+  $('#meta').textContent=last?('Actualizado '+hora(last)+' · se refresca cada minuto'):'Esperando datos…';
+}
+
+function render(){
+  $('#tabs').innerHTML=Object.keys(TABS).map(k=>`<button class="tab${S.tab===k?' on':''}" data-tab="${k}">${TABS[k]}</button>`).join('');
+  const fn={pagos:renderPagos,ingresos:renderIngresos,propuestas:renderPropuestas}[S.tab];
+  $('#app').innerHTML=fn();
+  updateMeta();
+}
+
+document.addEventListener('click',e=>{
+  if(e.target.closest('#refresh')){refreshAll();return}
+  const t=e.target.closest('[data-tab],[data-act]');
+  if(!t)return;
+  if(t.dataset.tab){S.tab=t.dataset.tab;render()}
+  else if(t.dataset.act==='permitir'){loadNow(t.dataset.key)}
+});
+document.addEventListener('change',e=>{
+  const f=e.target.dataset&&e.target.dataset.f;
+  if(!f)return;
+  if(f==='mesP')S.mesP=e.target.value;
+  if(f==='mesI')S.mesI=e.target.value;
+  if(f==='socia')S.socia=e.target.value;
+  render();
+});
+
+// ---------- Arranque: lectura en vivo por el conector de Google Drive ----------
+render();
+(async()=>{
+  let mcp=null;
+  try{mcp=window.claude?await window.claude.use('mcp'):null}catch(e){mcp=null}
+  if(!mcp){
+    // Sin conexión a Drive: mostrar la copia de respaldo con su fecha
+    Object.keys(CFG).forEach(k=>{
+      try{
+        S.data[k]=parseSheet(k,SNAPSHOT[k]);
+        S.st[k]='snap';
+        S.at[k]=SNAP_AT;
+      }catch(e){S.st[k]='nomcp'}
+    });
+    $('#refresh').style.display='none';
+    render();
+    return;
+  }
+  MCP=mcp;
+  Object.keys(CFG).forEach(k=>{
+    try{
+      mcp.watchTool(SRV,TOOL,inputFor(k),ev=>onEvent(k,ev),{refetchInterval:REFRESH});
+    }catch(e){S.st[k]='error'}
+  });
+  render();
+  setTimeout(()=>{
+    let ch=false;
+    Object.keys(CFG).forEach(k=>{if(S.st[k]==='loading'){S.st[k]='error';ch=true}});
+    if(ch)render();
+  },20000);
+})();
+</script>
